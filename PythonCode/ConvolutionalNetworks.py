@@ -3,8 +3,6 @@ Implements convolutional networks in PyTorch.
 """
 import torch
 
-from fully_connected_networks import Linear_ReLU, Linear, Solver, adam, ReLU
-
 class Linear(object):
 
     # Computes the forward pass for an linear (fully-connected) layer.
