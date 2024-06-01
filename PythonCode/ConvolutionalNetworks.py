@@ -5,17 +5,24 @@ import torch
 
 class Linear(object):
 
-    # Computes the forward pass for an linear (fully-connected) layer.
+    # Computes the forward pass for a linear (fully-connected) layer.
+    # Args:
+    # - x: Input data, of shape (N, d1, ..., d_k)
+    # - w: Weights, of shape (D, M)
+    # - b: Biases, of shape (M,)
     @staticmethod
     def forward(x, w, b):
-        
+        # Flatten input and compute the linear transformation
         x_flat = torch.flatten(x, start_dim=1)
         product = torch.mm(x_flat, w)
         out = torch.add(product, b)
         cache = (x, w, b)
         return out, cache
 
-    #Computes the backward pass for an linear layer.
+    # Computes the backward pass for a linear layer.
+    # Args:
+    # - dout: Upstream derivative, of shape (N, M)
+    # - cache: Tuple of (x, w, b) from forward pass
     @staticmethod
     def backward(dout, cache):
         x, w, b = cache
@@ -37,94 +44,122 @@ class Linear(object):
 
 class ReLU(object):
 
-    # Computes the forward pass for a layer of rectified
-    # linear units (ReLUs).
+    # Computes the forward pass for a layer of rectified linear units (ReLUs).
+    # Args:
+    # - x: Input data of any shape
     @staticmethod
     def forward(x):
-        
         out = None
         out = x.clone()
         out[out <= 0] = 0
-      
         cache = x
         return out, cache
 
+    # Computes the backward pass for a layer of rectified linear units (ReLUs).
+    # Args:
+    # - dout: Upstream derivative of any shape
+    # - cache: Input x from forward pass
     @staticmethod
-    #Computes the backward pass for a layer of rectified linear units (ReLUs).
     def backward(dout, cache):
-        
-
         dx, x = None, cache
-
-
         x_c = x.clone()
         x_c[x_c > 0] = 1
         x_c[x_c < 0] = 0
-        
         dx = torch.mul(dout, x_c)
-
         return dx
 
 
 class Linear_ReLU(object):
 
-    # Convenience layer that performs an linear transform
-    # followed by a ReLU.
+    # Convenience layer that performs a linear transform followed by a ReLU.
+    # Args:
+    # - x: Input data, of shape (N, d1, ..., d_k)
+    # - w: Weights, of shape (D, M)
+    # - b: Biases, of shape (M,)
     @staticmethod
     def forward(x, w, b):
-     
         a, fc_cache = Linear.forward(x, w, b)
         out, relu_cache = ReLU.forward(a)
         cache = (fc_cache, relu_cache)
         return out, cache
 
-    # Backward pass for the linear-relu convenience layer
+    # Backward pass for the linear-ReLU convenience layer.
+    # Args:
+    # - dout: Upstream derivative, of shape (N, M)
+    # - cache: Tuple of (fc_cache, relu_cache) from forward pass
     @staticmethod
     def backward(dout, cache):
-
         fc_cache, relu_cache = cache
         da = ReLU.backward(dout, relu_cache)
         dx, dw, db = Linear.backward(da, fc_cache)
         return dx, dw, db
 
-
 def softmax_loss(x, y):
+    """
+    Computes the loss and gradient for softmax classification.
+    Args:
+    - x: Input data, of shape (N, C) where x[i, j] is the score for the jth class for the ith input.
+    - y: Vector of labels, of shape (N,) where y[i] is the label for x[i] and 0 <= y[i] < C
+    """
+    # Shift the logits for numerical stability
     shifted_logits = x - x.max(dim=1, keepdim=True).values
+    # Compute the partition function
     Z = shifted_logits.exp().sum(dim=1, keepdim=True)
+    # Compute log probabilities
     log_probs = shifted_logits - Z.log()
+    # Compute probabilities
     probs = log_probs.exp()
     N = x.shape[0]
+    # Compute the loss
     loss = (-1.0 / N) * log_probs[torch.arange(N), y].sum()
+    # Compute the gradient on scores
     dx = probs.clone()
     dx[torch.arange(N), y] -= 1
     dx /= N
     return loss, dx
 
-#Uses the Adam update rule, which incorporates moving averages of both the
-# gradient and its square and a bias correction term.
 def adam(w, dw, config=None):
-  if config is None: config = {}
-  config.setdefault('learning_rate', 1e-3)
-  config.setdefault('beta1', 0.9)
-  config.setdefault('beta2', 0.999)
-  config.setdefault('epsilon', 1e-8)
-  config.setdefault('m', torch.zeros_like(w))
-  config.setdefault('v', torch.zeros_like(w))
-  config.setdefault('t', 0)
+    """
+    Uses the Adam update rule, which incorporates moving averages of both the
+    gradient and its square and a bias correction term.
+    Args:
+    - w: Current weights.
+    - dw: Gradient of the weights.
+    - config: Dictionary containing hyperparameters and intermediate values for Adam.
+    """
+    if config is None: config = {}
+    config.setdefault('learning_rate', 1e-3)
+    config.setdefault('beta1', 0.9)
+    config.setdefault('beta2', 0.999)
+    config.setdefault('epsilon', 1e-8)
+    config.setdefault('m', torch.zeros_like(w))
+    config.setdefault('v', torch.zeros_like(w))
+    config.setdefault('t', 0)
 
-  next_w = None
-  config['t'] += 1
-  config['m'] = config['beta1']*config['m'] + (1-config['beta1'])*dw
-  mt = config['m'] / (1-config['beta1']**config['t'])
-  config['v'] = config['beta2']*config['v'] + (1-config['beta2'])*(dw*dw)
-  vc = config['v'] / (1-(config['beta2']**config['t']))
-  w = w - (config['learning_rate'] * mt)/ (torch.sqrt(vc) + config['epsilon'])
-  next_w = w
+    next_w = None
+    config['t'] += 1
+    # Update biased first moment estimate
+    config['m'] = config['beta1'] * config['m'] + (1 - config['beta1']) * dw
+    # Compute bias-corrected first moment estimate
+    mt = config['m'] / (1 - config['beta1'] ** config['t'])
+    # Update biased second moment estimate
+    config['v'] = config['beta2'] * config['v'] + (1 - config['beta2']) * (dw * dw)
+    # Compute bias-corrected second moment estimate
+    vc = config['v'] / (1 - (config['beta2'] ** config['t']))
+    # Update weights
+    w = w - (config['learning_rate'] * mt) / (torch.sqrt(vc) + config['epsilon'])
+    next_w = w
 
-  return next_w, config
+    return next_w, config
 
 class Conv(object):
 
+    # Computes the forward pass for a convolutional layer.
+    # Args:
+    # x: Input data, of shape (N, C, H, W)
+    # w: Filter weights, of shape (F, C, HH, WW)
+    # b: Biases, of shape (F,)
+    # conv_param: Dictionary with keys 'stride' and 'pad'
     @staticmethod
     def forward(x, w, b, conv_param):
         out = None
@@ -150,79 +185,106 @@ class Conv(object):
         cache = (x, w, b, conv_param)
         return out, cache
 
-
+    # Computes the backward pass for a convolutional layer.
+    # Args:
+    # - dout: Upstream derivatives, of shape (N, F, H', W')
+    # - cache: Tuple of (x, w, b, conv_param) from forward pass
     @staticmethod
     def backward(dout, cache):
-       
         dx, dw, db = None, None, None
         x, w, b, conv_param = cache
 
+        # Initialize padding for the input gradient
         top_pad = torch.zeros((x.shape[0], x.shape[1], 1, x.shape[3]), device=x.device)
         side_pad = torch.zeros((x.shape[0], x.shape[1], x.shape[2] + conv_param['pad'] * 2, 1), device=x.device)
         x_pd = torch.clone(x)
         for i in range(conv_param['pad']):
-          x_pd = torch.cat((top_pad, x_pd, top_pad), dim = 2)
+            x_pd = torch.cat((top_pad, x_pd, top_pad), dim=2)
 
         for i in range(conv_param['pad']):
-          x_pd = torch.cat((side_pad, x_pd, side_pad), dim = 3)
+            x_pd = torch.cat((side_pad, x_pd, side_pad), dim=3)
         
-        H_final = 1 + (int) ((x.shape[2] + 2 * conv_param['pad'] - w.shape[2]) / conv_param['stride'])
-        W_final = 1 + (int) ((x.shape[3] + 2 * conv_param['pad'] - w.shape[3]) / conv_param['stride'])
+        # Compute output shape
+        H_final = 1 + (int)((x.shape[2] + 2 * conv_param['pad'] - w.shape[2]) / conv_param['stride'])
+        W_final = 1 + (int)((x.shape[3] + 2 * conv_param['pad'] - w.shape[3]) / conv_param['stride'])
         
-        dx = torch.zeros_like(x_pd, device = dout.device)        
-        dw = torch.zeros_like(w, device = dout.device)
-        db = torch.sum(dout, dim=(0,2,3))
+        dx = torch.zeros_like(x_pd, device=dout.device)
+        dw = torch.zeros_like(w, device=dout.device)
+        db = torch.sum(dout, dim=(0, 2, 3))
 
+        # Perform convolution gradient computation
         for N in range(x_pd.shape[0]):
-          for F in range(w.shape[0]):
-            for h in range(H_final):
-              for width in range(W_final):
-                filtered_X = x_pd[N, :, h*conv_param['stride']:(h*conv_param['stride'] + w.shape[2]), width*conv_param['stride']:(width*conv_param['stride'] + w.shape[3])]
-                dx[N,:,h*conv_param['stride']:(h*conv_param['stride'] + w.shape[2]),width*conv_param['stride']:(width*conv_param['stride'] + w.shape[3])] += dout[N,F,h,width] * w[F]
-                dw[F] += dout[N,F,h,width] * filtered_X
-        dx = dx[:,:, conv_param['pad']:conv_param['pad'] + x.shape[2], conv_param['pad']:conv_param['pad'] + x.shape[3]]
+            for F in range(w.shape[0]):
+                for h in range(H_final):
+                    for width in range(W_final):
+                        # Extract the relevant part of the input
+                        filtered_X = x_pd[N, :, h*conv_param['stride']:(h*conv_param['stride'] + w.shape[2]), width*conv_param['stride']:(width*conv_param['stride'] + w.shape[3])]
+                        # Compute gradients with respect to the input, weights, and biases
+                        dx[N, :, h*conv_param['stride']:(h*conv_param['stride'] + w.shape[2]), width*conv_param['stride']:(width*conv_param['stride'] + w.shape[3])] += dout[N, F, h, width] * w[F]
+                        dw[F] += dout[N, F, h, width] * filtered_X
+        # Remove padding from dx
+        dx = dx[:, :, conv_param['pad']:conv_param['pad'] + x.shape[2], conv_param['pad']:conv_param['pad'] + x.shape[3]]
         return dx, dw, db
-
 
 class MaxPool(object):
 
+    # Computes the forward pass for a max pooling layer.
+    # Args:
+    # x: Input data, of shape (N, C, H, W)
+    # pool_param: Dictionary with keys 'pool_height', 'pool_width', and 'stride'
     @staticmethod
     def forward(x, pool_param):
-      
         out = None
-        H_final = 1 + (int) ((x.shape[2] - pool_param['pool_height']) / pool_param['stride'])
-        W_final = 1 + (int) ((x.shape[3] - pool_param['pool_width']) / pool_param['stride'])
-        out = torch.zeros((x.shape[0], x.shape[1], H_final, W_final), device=x.device, dtype = x.dtype)
+        # Compute output shape
+        H_final = 1 + (int)((x.shape[2] - pool_param['pool_height']) / pool_param['stride'])
+        W_final = 1 + (int)((x.shape[3] - pool_param['pool_width']) / pool_param['stride'])
+        # Initialize output tensor
+        out = torch.zeros((x.shape[0], x.shape[1], H_final, W_final), device=x.device, dtype=x.dtype)
 
+        # Perform max pooling
         for N in range(x.shape[0]):
-          for C in range(x.shape[1]):
-            for h in range(H_final):
-              for w in range(W_final):
-                out[N, C, h, w] = torch.max(x[N, C, h*pool_param['stride']:(h*pool_param['stride'] + pool_param['pool_height']), w*pool_param['stride']:(w*pool_param['stride'] + pool_param['pool_width'])])
+            for C in range(x.shape[1]):
+                for h in range(H_final):
+                    for w in range(W_final):
+                        # Extract the region of interest
+                        region = x[N, C, h*pool_param['stride']:(h*pool_param['stride'] + pool_param['pool_height']),
+                                     w*pool_param['stride']:(w*pool_param['stride'] + pool_param['pool_width'])]
+                        # Apply max pooling
+                        out[N, C, h, w] = torch.max(region)
     
         out = out.cuda()
         cache = (x, pool_param)
         return out, cache
 
+    # Computes the backward pass for a max pooling layer.
+    # Args:
+    # - dout: Upstream derivatives, of shape (N, C, H', W')
+    # - cache: Tuple of (x, pool_param) from forward pass
     @staticmethod
     def backward(dout, cache):
         dx = None
         x, pool_param = cache
-        H_final = 1 + (int) ((x.shape[2] - pool_param['pool_height']) / pool_param['stride'])
-        W_final = 1 + (int) ((x.shape[3] - pool_param['pool_width']) / pool_param['stride'])
-        out = torch.zeros((x.shape[0], x.shape[1], H_final, W_final), device=x.device, dtype = x.dtype)
+        H_final = 1 + (int)((x.shape[2] - pool_param['pool_height']) / pool_param['stride'])
+        W_final = 1 + (int)((x.shape[3] - pool_param['pool_width']) / pool_param['stride'])
+        
+        # Initialize gradient tensor
+        dx = torch.zeros_like(x, device=dout.device)        
 
-        dx = torch.zeros_like(x, device = dout.device)        
-
+        # Compute gradients
         for N in range(x.shape[0]):
-          for C in range(x.shape[1]):
-            for h in range(H_final):
-              for w in range(W_final):
-                prePool = x[N, C, h*pool_param['stride']:(h*pool_param['stride'] + pool_param['pool_height']), w*pool_param['stride']:(w*pool_param['stride'] + pool_param['pool_width'])]
-                maxPos = (torch.max(prePool) == prePool).nonzero()
-                hpos = maxPos[0][0].item()
-                wpos = maxPos[0][1].item()
-                dx[N, C, h*pool_param['stride']:(h*pool_param['stride'] + pool_param['pool_height']), w*pool_param['stride']:(w*pool_param['stride'] + pool_param['pool_width'])][hpos, wpos] = dout[N, C, h, w]
+            for C in range(x.shape[1]):
+                for h in range(H_final):
+                    for w in range(W_final):
+                        # Extract the region of interest
+                        prePool = x[N, C, h*pool_param['stride']:(h*pool_param['stride'] + pool_param['pool_height']),
+                                      w*pool_param['stride']:(w*pool_param['stride'] + pool_param['pool_width'])]
+                        # Find the max position
+                        maxPos = (torch.max(prePool) == prePool).nonzero()
+                        hpos = maxPos[0][0].item()
+                        wpos = maxPos[0][1].item()
+                        # Distribute the gradient to the max position
+                        dx[N, C, h*pool_param['stride']:(h*pool_param['stride'] + pool_param['pool_height']),
+                           w*pool_param['stride']:(w*pool_param['stride'] + pool_param['pool_width'])][hpos, wpos] = dout[N, C, h, w]
        
         return dx
 
@@ -655,14 +717,24 @@ class DeepConvNet(object):
                     grads['b{i}'.format(i=num_layers - 1 - i)] = gradB                       
 
         return loss, grads
-# Kaiming initialization for linear and convolution layers.
-def kaiming_initializer(Din, Dout, K=None, relu=True, device='cpu',
-                        dtype=torch.float32):
-    gain = 2. if relu else 1.
+
+def kaiming_initializer(Din, Dout, K=None, relu=True, device='cpu', dtype=torch.float32):
+    """
+    Kaiming initialization for linear and convolution layers.
+    Din: Number of input units
+    Dout: Number of output units
+    K: Kernel size for convolutional layers (optional)
+    relu: Whether to use ReLU activation (default: True)
+    device: Device on which to create the tensor (default: 'cpu')
+    dtype: Data type of the tensor (default: torch.float32)
+    """
+    gain = 2.0 if relu else 1.0
     weight = None
     if K is None:
+        # For linear layers
         weight = torch.randn(size=(Din, Dout), dtype=dtype, device=device) * ((gain / Din) ** 0.5)
     else:
+        # For convolutional layers
         weight = torch.randn(size=(Dout, Din, K, K), dtype=dtype, device=device) * ((gain / (Din * K * K)) ** 0.5)
     return weight
 
@@ -670,6 +742,10 @@ def kaiming_initializer(Din, Dout, K=None, relu=True, device='cpu',
 class BatchNorm(object):
 
     # Forward pass for batch normalization.
+    # x: Input data of shape (N, D)
+    # gamma: Scale parameter of shape (D,)
+    # beta: Shift parameter of shape (D,)
+    # bn_param: Dictionary with keys 'mode', 'eps', 'momentum', 'running_mean', 'running_var'
     @staticmethod
     def forward(x, gamma, beta, bn_param):
         mode = bn_param['mode']
@@ -688,22 +764,25 @@ class BatchNorm(object):
 
         out, cache = None, None
         if mode == 'train':
-            # Replace "pass" statement with your code
+            # Compute mean and variance of the input
+            sample_mean = torch.mean(x, dim=0)
+            sample_var = torch.var(x, correction=0, dim=0)
             
-            sample_mean_new = torch.mean(x, dim=0)
-            sample_var_new = torch.var(x, correction=0, dim=0)
+            # Update running mean and variance
+            running_mean = momentum * running_mean + (1 - momentum) * sample_mean
+            running_var = momentum * running_var + (1 - momentum) * sample_var
             
-            running_mean_new = momentum * running_mean + (1 - momentum) * sample_mean_new
-            running_var_new = momentum * running_var + (1 - momentum) * sample_var_new
-            
-            centered_new = x - sample_mean_new
-            standardDev_new = torch.sqrt(sample_var_new + eps)
-            x_normalized = (x - sample_mean_new) / torch.sqrt(sample_var_new + eps)
+            # Normalize the input
+            centered = x - sample_mean
+            std_dev = torch.sqrt(sample_var + eps)
+            x_normalized = centered / std_dev
+            # Scale and shift the normalized input
             out = gamma * x_normalized + beta
-            cache = (x_normalized, centered_new, standardDev_new, mode, gamma, beta)
+            cache = (x_normalized, centered, std_dev, mode, gamma, beta)
         elif mode == 'test':
-            # Replace "pass" statement with your code
+            # Normalize the input using running mean and variance
             x_normalized = (x - running_mean) / torch.sqrt(running_var + eps)
+            # Scale and shift the normalized input
             out = gamma * x_normalized + beta
         else:
             raise ValueError('Invalid forward batchnorm mode "%s"' % mode)
@@ -715,16 +794,21 @@ class BatchNorm(object):
         return out, cache
 
     # Backward pass for batch normalization.
+    # dout: Upstream derivatives of shape (N, D)
+    # cache: Tuple of (x_normalized, centered, std_dev, mode, gamma, beta)
     @staticmethod
     def backward(dout, cache):
         dx, dgamma, dbeta = None, None, None
 
-        # Backward pass for batch normalization.
-        x_normalized, centered, standardDev, mode, gamma, beta = cache
+        x_normalized, centered, std_dev, mode, gamma, beta = cache
+        # Gradient with respect to gamma
         dgamma = torch.sum(dout * x_normalized, dim=0)
+        # Gradient with respect to beta
         dbeta = torch.sum(dout, dim=0)
+        # Intermediate gradient with respect to the input
         dx_inter = dout * gamma
-        dx = (1 / dout.shape[0] / standardDev) * (
+        # Gradient with respect to the input
+        dx = (1 / dout.shape[0] / std_dev) * (
                     dout.shape[0] * dx_inter - torch.sum(dx_inter, dim=0) - x_normalized * torch.sum(
                 dx_inter * x_normalized, dim=0))
 
@@ -734,34 +818,49 @@ class BatchNorm(object):
 class SpatialBatchNorm(object):
 
     # Computes the forward pass for spatial batch normalization.
+    # x: Input data of shape (N, C, H, W)
+    # gamma: Scale parameter of shape (C,)
+    # beta: Shift parameter of shape (C,)
+    # bn_param: Dictionary with keys 'mode', 'eps', 'momentum', 'running_mean', 'running_var'
     @staticmethod
     def forward(x, gamma, beta, bn_param):
         out, cache = None, None
 
+        # Reshape and permute input data to apply batch normalization
         x_reshaped = torch.permute(x, (0, 2, 3, 1)).reshape(-1, x.shape[1])
         out, cache = BatchNorm.forward(x_reshaped, gamma, beta, bn_param)
+        # Reshape and permute output back to original shape
         out = torch.permute(out.reshape(x.shape[0], x.shape[2], x.shape[3], x.shape[1]), (0, 3, 1, 2))
 
         return out, cache
 
     # Computes the backward pass for spatial batch normalization.
+    # dout: Upstream derivatives of shape (N, C, H, W)
+    # cache: Tuple of (x_normalized, centered, std_dev, mode, gamma, beta)
     @staticmethod
     def backward(dout, cache):
         dx, dgamma, dbeta = None, None, None
 
+        # Reshape and permute dout to apply batch normalization backward pass
         dout_reshaped = torch.permute(dout, (0, 2, 3, 1)).reshape(-1, dout.shape[1])
         dx, dgamma, dbeta = BatchNorm.backward(dout_reshaped, cache)
+        # Reshape and permute dx back to original shape
         dx = torch.permute(dx.reshape(dout.shape[0], dout.shape[2], dout.shape[3], dout.shape[1]), (0, 3, 1, 2))
 
         return dx, dgamma, dbeta
+
 
 ##################################################################
 #           Fast Implementations and Sandwich Layers             #
 ##################################################################
 
-
 class FastConv(object):
 
+    # Performs the forward pass for a fast convolution layer using PyTorch's nn.Conv2d.
+    # x: Input data, of shape (N, C, H, W)
+    # w: Filter weights, of shape (F, C, HH, WW)
+    # b: Biases, of shape (F,)
+    # conv_param: Dictionary with keys 'stride' and 'pad'
     @staticmethod
     def forward(x, w, b, conv_param):
         N, C, H, W = x.shape
@@ -776,6 +875,9 @@ class FastConv(object):
         cache = (x, w, b, conv_param, tx, out, layer)
         return out, cache
 
+    # Performs the backward pass for a fast convolution layer.
+    # dout: Upstream derivatives, of shape (N, F, H', W')
+    # cache: Tuple of (x, w, b, conv_param, tx, out, layer) from forward pass
     @staticmethod
     def backward(dout, cache):
         try:
@@ -784,6 +886,7 @@ class FastConv(object):
             dx = tx.grad.detach()
             dw = layer.weight.grad.detach()
             db = layer.bias.grad.detach()
+            # Reset gradients to None to avoid interference in future passes
             layer.weight.grad = layer.bias.grad = None
         except RuntimeError:
             dx, dw, db = torch.zeros_like(tx), \
@@ -794,20 +897,24 @@ class FastConv(object):
 
 class FastMaxPool(object):
 
+    # Performs the forward pass for a fast max pooling layer using PyTorch's nn.MaxPool2d.
+    # x: Input data, of shape (N, C, H, W)
+    # pool_param: Dictionary with keys 'pool_height', 'pool_width', and 'stride'
     @staticmethod
     def forward(x, pool_param):
         N, C, H, W = x.shape
-        pool_height, pool_width = \
-            pool_param['pool_height'], pool_param['pool_width']
+        pool_height, pool_width = pool_param['pool_height'], pool_param['pool_width']
         stride = pool_param['stride']
-        layer = torch.nn.MaxPool2d(kernel_size=(pool_height, pool_width),
-                                   stride=stride)
+        layer = torch.nn.MaxPool2d(kernel_size=(pool_height, pool_width), stride=stride)
         tx = x.detach()
         tx.requires_grad = True
         out = layer(tx)
         cache = (x, pool_param, tx, out, layer)
         return out, cache
 
+    # Performs the backward pass for a fast max pooling layer.
+    # dout: Upstream derivatives, of shape (N, C, H', W')
+    # cache: Tuple of (x, pool_param, tx, out, layer) from forward pass
     @staticmethod
     def backward(dout, cache):
         try:
@@ -822,6 +929,10 @@ class FastMaxPool(object):
 class Conv_ReLU(object):
 
     # A convenience layer that performs a convolution followed by a ReLU.
+    # x: Input data, of shape (N, C, H, W)
+    # w: Filter weights, of shape (F, C, HH, WW)
+    # b: Biases, of shape (F,)
+    # conv_param: Dictionary with keys 'stride' and 'pad'
     @staticmethod
     def forward(x, w, b, conv_param):
         a, conv_cache = FastConv.forward(x, w, b, conv_param)
@@ -829,6 +940,9 @@ class Conv_ReLU(object):
         cache = (conv_cache, relu_cache)
         return out, cache
 
+    # Performs the backward pass for the Conv-ReLU convenience layer.
+    # dout: Upstream derivatives, of shape (N, F, H', W')
+    # cache: Tuple of (conv_cache, relu_cache) from forward pass
     @staticmethod
     def backward(dout, cache):
         conv_cache, relu_cache = cache
@@ -839,6 +953,12 @@ class Conv_ReLU(object):
 
 class Conv_ReLU_Pool(object):
 
+    # A convenience layer that performs a convolution followed by a ReLU and a max pooling layer.
+    # x: Input data, of shape (N, C, H, W)
+    # w: Filter weights, of shape (F, C, HH, WW)
+    # b: Biases, of shape (F,)
+    # conv_param: Dictionary with keys 'stride' and 'pad'
+    # pool_param: Dictionary with keys 'pool_height', 'pool_width', and 'stride'
     @staticmethod
     def forward(x, w, b, conv_param, pool_param):
         a, conv_cache = FastConv.forward(x, w, b, conv_param)
@@ -847,9 +967,11 @@ class Conv_ReLU_Pool(object):
         cache = (conv_cache, relu_cache, pool_cache)
         return out, cache
 
+    # Performs the backward pass for the Conv-ReLU-Pool convenience layer.
+    # dout: Upstream derivatives, of shape (N, F, H', W')
+    # cache: Tuple of (conv_cache, relu_cache, pool_cache) from forward pass
     @staticmethod
     def backward(dout, cache):
-
         conv_cache, relu_cache, pool_cache = cache
         ds = FastMaxPool.backward(dout, pool_cache)
         da = ReLU.backward(ds, relu_cache)
@@ -859,18 +981,26 @@ class Conv_ReLU_Pool(object):
 
 class Linear_BatchNorm_ReLU(object):
 
+    # A convenience layer that performs a linear transform followed by batch normalization and a ReLU.
+    # x: Input data, of shape (N, D)
+    # w: Weights, of shape (D, M)
+    # b: Biases, of shape (M,)
+    # gamma: Scale parameter of shape (M,)
+    # beta: Shift parameter of shape (M,)
+    # bn_param: Dictionary with keys 'mode', 'eps', 'momentum', 'running_mean', 'running_var'
     @staticmethod
     def forward(x, w, b, gamma, beta, bn_param):
-       
         a, fc_cache = Linear.forward(x, w, b)
         a_bn, bn_cache = BatchNorm.forward(a, gamma, beta, bn_param)
         out, relu_cache = ReLU.forward(a_bn)
         cache = (fc_cache, bn_cache, relu_cache)
         return out, cache
 
+    # Performs the backward pass for the Linear-BatchNorm-ReLU convenience layer.
+    # dout: Upstream derivatives, of shape (N, M)
+    # cache: Tuple of (fc_cache, bn_cache, relu_cache) from forward pass
     @staticmethod
     def backward(dout, cache):
-      
         fc_cache, bn_cache, relu_cache = cache
         da_bn = ReLU.backward(dout, relu_cache)
         da, dgamma, dbeta = BatchNorm.backward(da_bn, bn_cache)
@@ -880,15 +1010,25 @@ class Linear_BatchNorm_ReLU(object):
 
 class Conv_BatchNorm_ReLU(object):
 
+    # A convenience layer that performs a convolution followed by batch normalization and a ReLU.
+    # x: Input data, of shape (N, C, H, W)
+    # w: Filter weights, of shape (F, C, HH, WW)
+    # b: Biases, of shape (F,)
+    # gamma: Scale parameter of shape (F,)
+    # beta: Shift parameter of shape (F,)
+    # conv_param: Dictionary with keys 'stride' and 'pad'
+    # bn_param: Dictionary with keys 'mode', 'eps', 'momentum', 'running_mean', 'running_var'
     @staticmethod
     def forward(x, w, b, gamma, beta, conv_param, bn_param):
         a, conv_cache = FastConv.forward(x, w, b, conv_param)
-        an, bn_cache = SpatialBatchNorm.forward(a, gamma,
-                                                beta, bn_param)
+        an, bn_cache = SpatialBatchNorm.forward(a, gamma, beta, bn_param)
         out, relu_cache = ReLU.forward(an)
         cache = (conv_cache, bn_cache, relu_cache)
         return out, cache
 
+    # Performs the backward pass for the Conv-BatchNorm-ReLU convenience layer.
+    # dout: Upstream derivatives, of shape (N, F, H', W')
+    # cache: Tuple of (conv_cache, bn_cache, relu_cache) from forward pass
     @staticmethod
     def backward(dout, cache):
         conv_cache, bn_cache, relu_cache = cache
@@ -900,6 +1040,15 @@ class Conv_BatchNorm_ReLU(object):
 
 class Conv_BatchNorm_ReLU_Pool(object):
 
+    # A convenience layer that performs a convolution followed by batch normalization, a ReLU, and a max pooling layer.
+    # x: Input data, of shape (N, C, H, W)
+    # w: Filter weights, of shape (F, C, HH, WW)
+    # b: Biases, of shape (F,)
+    # gamma: Scale parameter of shape (F,)
+    # beta: Shift parameter of shape (F,)
+    # conv_param: Dictionary with keys 'stride' and 'pad'
+    # bn_param: Dictionary with keys 'mode', 'eps', 'momentum', 'running_mean', 'running_var'
+    # pool_param: Dictionary with keys 'pool_height', 'pool_width', and 'stride'
     @staticmethod
     def forward(x, w, b, gamma, beta, conv_param, bn_param, pool_param):
         a, conv_cache = FastConv.forward(x, w, b, conv_param)
@@ -909,6 +1058,9 @@ class Conv_BatchNorm_ReLU_Pool(object):
         cache = (conv_cache, bn_cache, relu_cache, pool_cache)
         return out, cache
 
+    # Performs the backward pass for the Conv-BatchNorm-ReLU-Pool convenience layer.
+    # dout: Upstream derivatives, of shape (N, F, H', W')
+    # cache: Tuple of (conv_cache, bn_cache, relu_cache, pool_cache) from forward pass
     @staticmethod
     def backward(dout, cache):
         conv_cache, bn_cache, relu_cache, pool_cache = cache
